@@ -855,12 +855,12 @@ async fn a_power_flag_on_a_private_lead_is_not_a_removable_supply() {
         .find(|ends| ends.contains(&tip))
         .unwrap();
     let (x, y) = ((wire[0].0 + wire[1].0) / 2.0, (wire[0].1 + wire[1].1) / 2.0);
-    // Name this island through the legacy graph without adding a physically
-    // attached label, so only the electrical type disqualifies the private lead.
+    // Name the net with the label hit allowance without placing the anchor
+    // on the exact redraw path. Only electrical type disqualifies the lead.
     let (x, y) = if wire[0].0 == wire[1].0 {
-        (x + 0.001, y)
+        (x + 0.0001, y)
     } else {
-        (x, y + 0.001)
+        (x, y + 0.0001)
     };
     let mut tree = sheet.tree.clone();
     let SexpNode::List(items) = &mut tree else {
@@ -1441,13 +1441,6 @@ async fn a_label_off_the_wire_does_not_prove_a_drawn_run() {
         );
         let inventory = Inventory::new(&tree).unwrap();
         let labels = extract_labels(&tree);
-        let mut queried =
-            crate::tools::sch_connectivity::drawn_net_graph_for(&tree, &inventory.wires, &labels);
-        assert_eq!(
-            queried.root_at(142.24, 88.9),
-            queried.root_at(138.43, 83.82),
-            "the shared graph tolerates the offset"
-        );
         let mut drawn =
             crate::tools::sch_connectivity::redraw_net_graph(&tree, &inventory.wires, &labels);
         let root = drawn.root_at(142.24, 88.9);

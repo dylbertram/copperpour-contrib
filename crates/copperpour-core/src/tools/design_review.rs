@@ -8,7 +8,10 @@
 use super::cli;
 use crate::mcp::protocol::CallToolResult;
 use crate::tool;
-use crate::tools::sch_connectivity::{net_graph_for, NetGraph, NetRoot, COINCIDENT_TOLERANCE};
+use crate::tools::sch_connectivity::{
+    net_graph_for, saved_net_labels, schematic_pin_endpoint, NetGraph, NetRoot,
+    COINCIDENT_TOLERANCE,
+};
 use crate::tools::{
     get_path, invalid_arg, is_power_symbol_reference, placed_pins_by_reference, project_name_for,
     sch_hierarchy, ToolContext, ToolDef,
@@ -19,8 +22,7 @@ use copperpour_sexp::{
     parser::parse_sexp,
     schematic::{
         extract_all_net_labels, extract_lib_pins, extract_lib_pins_for_unit, extract_no_connects,
-        extract_symbol_instances, extract_wires, find_lib_symbol, pin_endpoint, read_schematic,
-        Label, LabelKind,
+        extract_symbol_instances, extract_wires, find_lib_symbol, read_schematic, Label, LabelKind,
     },
 };
 use serde_json::{json, Value};
@@ -245,7 +247,7 @@ async fn handle_audit_decoupling_file(
 
     let placed = placed_pins_by_reference(&tree);
     let wires = extract_wires(&tree);
-    let mut labels = extract_all_net_labels(&tree);
+    let mut labels = saved_net_labels(&tree);
     labels.extend(hidden_power_pin_labels(&placed));
     let no_connects = extract_no_connects(&tree);
     let mut graph = net_graph_for(&tree, &wires, &labels);
@@ -279,7 +281,7 @@ async fn handle_audit_decoupling_file(
             }
 
             // Get the endpoint position of this power pin
-            let (px, py) = pin_endpoint(pin, *transform);
+            let (px, py) = graph.pin_position(pin, *transform);
 
             // A no-connect flag on the pin leaves it unused on purpose.
             if no_connects
@@ -359,7 +361,7 @@ async fn handle_audit_connections_file(
 
     let placed = placed_pins_by_reference(&tree);
     let wires = extract_wires(&tree);
-    let labels = extract_all_net_labels(&tree);
+    let labels = saved_net_labels(&tree);
     let mut graph = net_graph_for(&tree, &wires, &labels);
     let pull_up_roots = pull_up_nets(&mut graph, &placed);
 
@@ -375,7 +377,7 @@ async fn handle_audit_connections_file(
 
             for (pin_name, placed_pin) in [("SDA", named("SDA")), ("SCL", named("SCL"))] {
                 if let Some((pin, transform)) = placed_pin {
-                    let (px, py) = pin_endpoint(pin, *transform);
+                    let (px, py) = graph.pin_position(pin, *transform);
                     let root = graph.root_at(px, py);
                     let net = graph.name_of_root(root);
                     if let Some(ref net_name) = net {
@@ -405,7 +407,7 @@ async fn handle_audit_connections_file(
             if (name_upper.contains("RESET") || name_upper.contains("NRST") || name_upper == "RST")
                 && !name_upper.contains("OUT")
             {
-                let (px, py) = pin_endpoint(pin, *transform);
+                let (px, py) = graph.pin_position(pin, *transform);
                 let root = graph.root_at(px, py);
                 let net = graph.name_of_root(root);
                 if let Some(ref net_name) = net {
@@ -451,7 +453,7 @@ async fn handle_audit_power_rails_file(
 
     let placed = placed_pins_by_reference(&tree);
     let wires = extract_wires(&tree);
-    let labels = extract_all_net_labels(&tree);
+    let labels = saved_net_labels(&tree);
     let mut graph = net_graph_for(&tree, &wires, &labels);
 
     let mut findings = Vec::new();
@@ -1717,7 +1719,7 @@ type PlacedUnit = (copperpour_sexp::schematic::SymbolInstance, Vec<PlacedPin>);
 fn pin_net_roots(graph: &mut NetGraph, pins: &[PlacedPin]) -> HashSet<NetRoot> {
     pins.iter()
         .map(|(pin, transform)| {
-            let (px, py) = pin_endpoint(pin, *transform);
+            let (px, py) = graph.pin_position(pin, *transform);
             graph.root_at(px, py)
         })
         .collect()
@@ -1739,7 +1741,7 @@ fn hidden_power_pin_labels(placed: &[PlacedUnit]) -> Vec<Label> {
                     pin.hidden && pin.electrical_type == "power_in" && !pin.name.is_empty()
                 })
                 .map(move |(pin, transform)| {
-                    let (x, y) = pin_endpoint(pin, *transform);
+                    let (x, y) = schematic_pin_endpoint(pin, *transform);
                     Label {
                         kind: LabelKind::PowerSymbol,
                         net: pin.name.clone(),

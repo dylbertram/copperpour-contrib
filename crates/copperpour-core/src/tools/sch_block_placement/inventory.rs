@@ -1,5 +1,5 @@
 use super::super::sch_connectivity::{
-    redraw_net_graph, redraw_point_key, snapshot_net_graph, NetRoot,
+    redraw_net_graph, schematic_point, snapshot_net_graph, NetRoot,
 };
 use super::super::{resolved_placed_pins_by_reference, UNRESOLVED_PIN_GEOMETRY};
 use copperpour_sexp::schematic::{
@@ -213,7 +213,7 @@ impl<'a> Inventory<'a> {
                     return Err(format!("{} has an unreadable pin pose", inst.reference));
                 }
                 if !numbers.insert(pin.number.clone())
-                    || !tips.insert(redraw_point_key(tip.0, tip.1))
+                    || !tips.insert(schematic_point(tip.0, tip.1))
                 {
                     return Err(format!("{} has shared or stacked pins", inst.reference));
                 }

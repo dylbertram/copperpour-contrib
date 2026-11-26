@@ -37,7 +37,7 @@ Counts move at release.
 
 Compare `NetGraph` roots with `root_at` in `tools/sch_connectivity.rs`.
 One root can have several names. Use `name_of_root` and `net_at` for reporting.
-`seed_net_graph` joins points by geometry, then `merge_named_nets` joins points
+`saved_drawn_graph` joins points by geometry, then `merge_named_nets` joins points
 by name. `driver_priority` ranks global labels first, followed by power symbols, local
 labels, and hierarchical labels. Ties use ascending name order.
 

@@ -15,7 +15,7 @@ use crate::tools::{
 use copperpour_schematic_editor as cse;
 use copperpour_schematic_editor::types::fmt_f64;
 use copperpour_sexp::{
-    geometry::{round6, snap_point, transform_pin},
+    geometry::{round6, snap_point},
     parser::parse_sexp,
     schematic::{
         extract_symbol_instances, extract_wires, find_lib_symbol, find_t_junctions,
@@ -739,18 +739,7 @@ impl ConnectionRefusal {
 }
 
 fn saved_pin_tip(pin: &NamedPin) -> (f64, f64) {
-    // KiCad reads the origin and library pin offset separately, and truncates
-    // the instance angle before choosing the orthogonal transform.
-    transform_pin(
-        kicad_schematic_mm(pin.pin.local_x),
-        kicad_schematic_mm(pin.pin.local_y),
-        copperpour_sexp::geometry::PinTransform {
-            comp_x: kicad_schematic_mm(pin.t.comp_x),
-            comp_y: kicad_schematic_mm(pin.t.comp_y),
-            rotation_deg: pin.t.rotation_deg.trunc(),
-            ..pin.t
-        },
-    )
+    super::sch_connectivity::schematic_pin_endpoint(&pin.pin, pin.t)
 }
 
 fn saved_wire_point((x, y): (f64, f64)) -> (f64, f64) {
@@ -1098,16 +1087,18 @@ impl RouteGuard {
         pins: crate::tools::PlacedPinsByReference,
         power_net: Option<&str>,
     ) -> Self {
-        use crate::tools::sch_connectivity::pt_key;
-        use copperpour_sexp::geometry::point_on_segment;
+        use crate::tools::sch_connectivity::{
+            schematic_pin_endpoint, schematic_point, schematic_point_on_wire,
+        };
         use copperpour_sexp::schematic::{extract_sheet_pins, LabelKind};
-        let labels = copperpour_sexp::schematic::extract_all_net_labels(before);
+        let labels = super::sch_connectivity::saved_net_labels(before);
         let wires = extract_wires(before);
         let mut graph = crate::tools::sch_connectivity::net_graph_for(before, &wires, &labels);
 
         let mut terminals: Vec<Terminal> = Vec::new();
         let mut index: std::collections::HashMap<(i64, i64), usize> = Default::default();
-        let mut push = |at: (f64, f64), desc: String| match index.get(&pt_key(at.0, at.1)) {
+        let mut push = |at: (f64, f64), desc: String| match index.get(&schematic_point(at.0, at.1))
+        {
             Some(&i) => terminals[i].descs.push(desc),
             None => {
                 let root = graph.root_at(at.0, at.1);
@@ -1115,7 +1106,7 @@ impl RouteGuard {
                     .name_of_root(root)
                     .map(|n| format!(" on net {n}"))
                     .unwrap_or_default();
-                index.insert(pt_key(at.0, at.1), terminals.len());
+                index.insert(schematic_point(at.0, at.1), terminals.len());
                 terminals.push(Terminal {
                     at,
                     descs: vec![desc],
@@ -1127,7 +1118,7 @@ impl RouteGuard {
         for (inst, pins) in pins {
             for (pin, t) in pins {
                 push(
-                    pin_endpoint(&pin, t),
+                    schematic_pin_endpoint(&pin, t),
                     format!("{} pin {}", inst.reference, pin.number),
                 );
             }
@@ -1145,12 +1136,13 @@ impl RouteGuard {
             push(at, "a sheet pin".into());
         }
 
-        let ends: Vec<_> = std::iter::once(from).chain(also.iter().copied()).collect();
+        let ends: Vec<_> = std::iter::once(from)
+            .chain(also.iter().copied())
+            .map(saved_wire_point)
+            .collect();
         let mut allowed: Vec<_> = ends.iter().map(|p| graph.root_at(p.0, p.1)).collect();
         for w in &wires {
-            if ends.iter().any(|p| {
-                power_net.is_none() && point_on_segment(p.0, p.1, w.x1, w.y1, w.x2, w.y2, 0.01)
-            }) {
+            if power_net.is_none() && ends.iter().any(|&p| schematic_point_on_wire(p, w)) {
                 allowed.push(graph.root_at(w.x1, w.y1));
             }
         }
@@ -1162,7 +1154,7 @@ impl RouteGuard {
         );
         RouteGuard {
             allowed,
-            a: from,
+            a: ends[0],
             terminals,
         }
     }
@@ -1181,7 +1173,7 @@ impl RouteGuard {
     /// Each point whose items `after` puts on `a`'s net although they were on
     /// no allowed net before.
     fn foreign_joins(&self, after: &copperpour_sexp::SexpNode) -> Vec<String> {
-        let labels = copperpour_sexp::schematic::extract_all_net_labels(after);
+        let labels = super::sch_connectivity::saved_net_labels(after);
         let mut graph =
             crate::tools::sch_connectivity::net_graph_for(after, &extract_wires(after), &labels);
         let routed = graph.root_at(self.a.0, self.a.1);
@@ -3446,7 +3438,7 @@ fn power_symbol_origin(
     point: (f64, f64),
     rotation: f64,
 ) -> (f64, f64) {
-    let (dx, dy) = pin_endpoint(
+    let (dx, dy) = super::sch_connectivity::schematic_pin_endpoint(
         power_pin,
         copperpour_sexp::geometry::PinTransform {
             comp_x: 0.0,
@@ -3490,14 +3482,14 @@ struct ExistingPower {
 
 impl ExistingPower {
     fn new(tree: &copperpour_sexp::SexpNode, power_net: &str) -> Self {
-        use copperpour_sexp::schematic::{extract_all_net_labels, extract_power_symbol_labels};
+        use super::sch_connectivity::{saved_net_labels, saved_power_labels};
         let mut graph = super::sch_connectivity::net_graph_for(
             tree,
             &extract_wires(tree),
-            &extract_all_net_labels(tree),
+            &saved_net_labels(tree),
         );
         let instances = extract_symbol_instances(tree);
-        let symbols = extract_power_symbol_labels(tree)
+        let symbols = saved_power_labels(tree)
             .into_iter()
             .filter(|l| l.net == power_net)
             .filter_map(|l| {
@@ -4026,7 +4018,7 @@ async fn handle_add_power_symbol(
             };
             let site = match resolve_power_pin(&placed, &reference, &pin_number) {
                 Ok(pin) => PowerSite::Pin {
-                    endpoint: pin.endpoint(),
+                    endpoint: saved_pin_tip(&pin),
                     outward: pin.outward(),
                 },
                 Err(e) => return Ok(e),
@@ -4345,7 +4337,14 @@ impl PowerObstacles {
         let (pins, unresolved_pins) = super::sch_pin_contacts::clearance_pin_inventory(tree);
         let mut points: Vec<_> = pins
             .iter()
-            .flat_map(|(_, pins)| pins.iter().map(|(pin, t)| (pin_endpoint(pin, *t), "pin")))
+            .flat_map(|(_, pins)| {
+                pins.iter().map(|(pin, t)| {
+                    (
+                        super::sch_connectivity::schematic_pin_endpoint(pin, *t),
+                        "pin",
+                    )
+                })
+            })
             .collect();
         points.extend(
             ks::extract_labels(tree)
@@ -4599,14 +4598,11 @@ pub(crate) async fn handle_batch_add_power_symbol(
             continue;
         }
         let (endpoint, outward) = match resolve_power_pin(&placed_pins, &reference, &pin_number) {
-            Ok(pin) => (pin.endpoint(), pin.outward()),
+            Ok(pin) => (saved_pin_tip(&pin), pin.outward()),
             Err(e) => return Ok(e),
         };
         let pin = (reference, pin_number);
-        match points
-            .iter_mut()
-            .find(|p| points_coincident(p.endpoint.0, p.endpoint.1, endpoint.0, endpoint.1, 0.01))
-        {
+        match points.iter_mut().find(|p| p.endpoint == endpoint) {
             Some(point) => {
                 if let (Some(a), Some(b)) = (point.rotation, rotation) {
                     if a.rem_euclid(360.0) != b.rem_euclid(360.0) {

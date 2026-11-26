@@ -175,17 +175,17 @@ and Windows servers do not.
 | `list_schematic_wires` | List all wire segments with start/end coordinates and UUIDs. |
 | `list_schematic_nets` | List all distinct net names from net labels, global labels, and power symbols. |
 | `list_schematic_labels` | List all net, global, and hierarchical labels with positions, net names, types, and UUIDs (usable with `batch_delete`). |
-| `get_net_connections` | Get all pins and labels connected to a named net. |
-| `get_net_connectivity` | Build the full connectivity graph for a net using union-find. Returns wires, labels, and T-junction locations. |
-| `get_pin_connections` | Get the net connected to a specific pin by tracing wires from the pin endpoint. |
+| `get_net_connections` | Get all pins and labels on a named net. Drawn label attachment uses saved schematic coordinates and KiCad's one-unit allowance. |
+| `get_net_connectivity` | Return wires, labels, and T-junction locations for a named net. A nearby label that KiCad leaves detached does not put the wire on that net. |
+| `get_pin_connections` | Get the net at a specific pin, using saved-coordinate label attachment. |
 | `get_pin_net_name` | Return just the net name for a specific pin on a component. |
-| `get_component_nets` | Get all nets connected to every pin of a component. |
-| `get_net_components` | Get all components (and their pins) connected to a named net. |
-| `trace_from_point` | Trace connectivity from any (X,Y) point — returns the wires, labels, component pins and junction dots at that point, and the net it belongs to. Hierarchical sheet pins and no-connect flags are not reported, so an empty pins_here does not prove a wire dangles. |
+| `get_component_nets` | Get the net at each pin of a component, using saved-coordinate label attachment. |
+| `get_net_components` | Get all components and pins on a named net, using saved-coordinate label attachment. |
+| `trace_from_point` | Return nearby wires, labels, component pins and junction dots, and the net at the saved coordinate. An item in `labels_here` need not belong to that net. Hierarchical sheet pins and no-connect flags are not reported. |
 | `find_orphan_items` | Find dangling wire ends, floating labels, and unconnected pin endpoints. Pins, sheet pins, junctions, and no-connect flags all count as connections. |
 | `find_shorted_nets` | Detect accidentally merged nets — distinct net names that KiCad nets together, through a wire path they share or through a name that joins their segments. |
 | `find_single_pin_nets` | Find nets that reach at most one pin — often a missing counterpart, an orphan label, or a stub left by a deleted component. Component pins and hierarchical sheet pins count; a power symbol's own pin names the rail rather than consuming it and does not. Reports the pin and label counts, and every label kind that named the net. Read per sheet: a net a global, hierarchical or power label can carry off this one is flagged cross_sheet_unverified. |
-| `get_connected_items` | Get all wires, labels, and components connected to a given component by tracing each of its pins. |
+| `get_connected_items` | Get wires, attached labels, and other components on the given component's nets. A nearby label that KiCad leaves detached is not attached by proximity. |
 
 ### `sch_readability` · 4 tools
 **Purpose:** Read-only drawing and layout checks on saved schematic sheets.
