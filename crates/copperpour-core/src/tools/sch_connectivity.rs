@@ -682,6 +682,24 @@ fn saved_drawn_graph(
     allow_label_roundoff: bool,
 ) -> NetGraph {
     let index = SavedWireIndex::new(wires);
+    let pin_or_no_connect: HashSet<_> = if allow_label_roundoff
+        && labels
+            .iter()
+            .any(|label| label.kind != LabelKind::PowerSymbol)
+    {
+        super::drawn_symbol_pin_inventory(tree)
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, pins)| {
+                pins.into_iter()
+                    .map(|(pin, t)| schematic_pin_endpoint(&pin, t))
+            })
+            .chain(extract_no_connects(tree))
+            .map(|(x, y)| schematic_point(x, y))
+            .collect()
+    } else {
+        HashSet::new()
+    };
     seed_drawn_graph_with(
         wires,
         labels,
@@ -703,10 +721,22 @@ fn saved_drawn_graph(
                     )
                 );
             if roundoff {
-                for &[a, b] in index.candidates(point, 1) {
-                    if label_hits_segment(point, a, b) {
-                        graph.union(point, a);
-                    }
+                let mut hits = index
+                    .candidates(point, 1)
+                    .filter(|&&[a, b]| label_hits_segment(point, a, b));
+                let Some(&[a, _]) = hits.next() else {
+                    return;
+                };
+                // A coincident pin or no-connect suppresses the usual segment
+                // scan. KiCad still connects when two or more lines overlap
+                // the label, and shared endpoints already have the same key.
+                let second = hits.next();
+                if pin_or_no_connect.contains(&point) && second.is_none() {
+                    return;
+                }
+                graph.union(point, a);
+                for &[a, _] in second.into_iter().chain(hits) {
+                    graph.union(point, a);
                 }
             } else {
                 for &[a, b] in index.candidates(point, 0) {

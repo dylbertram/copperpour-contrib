@@ -19,6 +19,18 @@ const ONE_UNIT: &str =
     include_str!("fixtures/label_attachment_kicad10/one-unit/opamp_stage.kicad_sch");
 const TWO_UNITS: &str =
     include_str!("fixtures/label_attachment_kicad10/two-units/opamp_stage.kicad_sch");
+const LABEL_ON_PIN: &str = include_str!(
+    "fixtures/label_attachment_kicad10/label-on-pin-exact-passing/opamp_stage.kicad_sch"
+);
+const NO_CONNECT: &str =
+    include_str!("fixtures/label_attachment_kicad10/label-on-no-connect/opamp_stage.kicad_sch");
+const MULTIPLE_WIRES: &str = include_str!(
+    "fixtures/label_attachment_kicad10/label-on-pin-multiple-wires/opamp_stage.kicad_sch"
+);
+const NO_COINCIDENT_PIN: &str =
+    include_str!("fixtures/label_attachment_kicad10/label-without-pin/opamp_stage.kicad_sch");
+const PIN_ROUTE: &str =
+    include_str!("fixtures/label_attachment_kicad10/label-on-pin-route/opamp_stage.kicad_sch");
 const PROJECT: &str =
     include_str!("fixtures/block_placement_kicad10/opamp_stage/opamp_stage.kicad_pro");
 const POWER_ROUNDED: &str =
@@ -588,4 +600,45 @@ async fn wire_runs_use_electrical_names_without_cutting_at_off_wire_labels() {
             assert_eq!(run["net"], name, "{run}");
         }
     }
+}
+
+async fn b_pin_name(source: &str) -> Value {
+    call(
+        &handler().await,
+        &Sheet::new(source),
+        "get_pin_connections",
+        json!({"reference": "J3", "pin_number": "1"}),
+    )
+    .await["net"]
+        .clone()
+}
+
+
+#[tokio::test]
+async fn a_pin_label_does_not_name_a_single_passing_wire() {
+    assert_eq!(b_pin_name(LABEL_ON_PIN).await, "B");
+    assert_eq!(b_pin_name(NO_COINCIDENT_PIN).await, "A");
+}
+
+
+#[tokio::test]
+async fn a_label_on_a_no_connect_does_not_name_a_single_passing_wire() {
+    assert_eq!(b_pin_name(NO_CONNECT).await, "B");
+}
+
+
+#[tokio::test]
+async fn a_label_on_a_pin_still_names_two_overlapping_wires() {
+    assert_eq!(b_pin_name(MULTIPLE_WIRES).await, "A");
+}
+
+
+#[tokio::test]
+async fn a_pin_label_one_unit_from_a_pass_does_not_authorize_the_passing_net() {
+    let body = route_refusal(PIN_ROUTE, [40.0, 30.0001], [40.0, 50.0]).await;
+    assert_eq!(
+        body["error"]["reasons"],
+        json!(["the straight route would join J3 pin 1 and label B at (50, 30) on net B"]),
+        "{body}"
+    );
 }

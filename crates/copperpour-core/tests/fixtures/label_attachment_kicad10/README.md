@@ -44,3 +44,10 @@ The `junction-1iu` review probe moves only the junction in `junction` to
 `(152.4, 88.9001)`, one saved unit from the horizontal trunk. KiCad 10.0.6
 and 10.0.8 resaved it byte for byte alike with `kicad-cli sch upgrade --force`.
 Both resaves export J2.1 on `/TOLERANT_OUT` and J2.2 on its unconnected net.
+
+## Pin label witnesses
+
+The connector sheets were resaved with KiCad 10.0.8. With label A on J2.1 or on a no-
+connect flag, both KiCad 10.0.6 and 10.0.8 leave J3.1 on B when only one wire passes.
+Without the coincident pin, or with two overlapping wires, J3.1 is on A. In the route
+case J2 is mirrored before resaving so pin 2 does not independently block the route.
