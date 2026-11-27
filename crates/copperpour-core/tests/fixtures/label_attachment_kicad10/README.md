@@ -44,3 +44,11 @@ The `junction-1iu` review probe moves only the junction in `junction` to
 `(152.4, 88.9001)`, one saved unit from the horizontal trunk. KiCad 10.0.6
 and 10.0.8 resaved it byte for byte alike with `kicad-cli sch upgrade --force`.
 Both resaves export J2.1 on `/TOLERANT_OUT` and J2.2 on its unconnected net.
+
+## Diagonal witnesses
+
+The sheets were resaved with KiCad 10.0.8. Moving the trunk's left end to (134.62,
+88.9048) gives a hit at label y = 88.9023 and a miss at y = 88.9025 on both 10.0.6
+and 10.0.8. In `precision-before`, both versions attach REVIEW_BOUNDARY to the
+proposed shallow diagonal. In `power-before`, the junction attaches the diagonal to
+SIGNAL, while the undotted GND pin does not name that wire.

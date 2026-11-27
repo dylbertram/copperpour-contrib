@@ -255,17 +255,41 @@ fn on_saved_segment(p: NetRoot, a: NetRoot, b: NetRoot) -> bool {
 }
 
 /// A label can meet an endpoint or a segment interior with one IU of
-/// rounding allowance. The index supplies only horizontal and vertical wires.
+/// rounding allowance. KiCad's segment hit first bounds the point in both
+/// axes, then applies the rounded squared-distance check on diagonals.
 fn label_hits_segment(p: NetRoot, a: NetRoot, b: NetRoot) -> bool {
     let axis_distance = |p: i64, a: i64, b: i64| p.abs_diff(p.clamp(a.min(b), a.max(b)));
-    axis_distance(p.0, a.0, b.0) <= 1 && axis_distance(p.1, a.1, b.1) <= 1
+    if axis_distance(p.0, a.0, b.0) > 1 || axis_distance(p.1, a.1, b.1) > 1 {
+        return false;
+    }
+    if a.0 == b.0 || a.1 == b.1 {
+        return true;
+    }
+    let (dx, dy) = (i128::from(b.0 - a.0), i128::from(b.1 - a.1));
+    let (px, py) = (i128::from(p.0 - a.0), i128::from(p.1 - a.1));
+    let length_squared = dx * dx + dy * dy;
+    let dot = dx * px + dy * py;
+    match dot.clamp(0, length_squared) {
+        // The closest point is an endpoint. This also covers zero-length wires.
+        0 => px * px + py * py < 4,
+        t if t == length_squared => (px - dx).pow(2) + (py - dy).pow(2) < 4,
+        _ => {
+            // Keep KiCad's evaluation order in SEG::SquaredDistance. Near the
+            // cutoff, the cross-product formula need not round to the same hit.
+            let dot = dot as f64;
+            let distance = (px * px + py * py) as f64 - dot * dot / length_squared as f64;
+            distance.round() < 4.0
+        }
+    }
 }
 
-/// Axis-aligned wires indexed by their exact integer row or column.
+/// Axis-aligned wires use exact integer row/column keys. The small list of
+/// diagonal wires is also checked, including near-axis routes.
 #[derive(Default)]
 struct SavedWireIndex {
     rows: HashMap<i64, Vec<[NetRoot; 2]>>,
     columns: HashMap<i64, Vec<[NetRoot; 2]>>,
+    diagonals: Vec<[NetRoot; 2]>,
 }
 
 impl SavedWireIndex {
@@ -277,19 +301,23 @@ impl SavedWireIndex {
                 index.columns.entry(a.0).or_default().push([a, b]);
             } else if a.1 == b.1 {
                 index.rows.entry(a.1).or_default().push([a, b]);
+            } else {
+                index.diagonals.push([a, b]);
             }
         }
         index
     }
 
     fn candidates(&self, p: NetRoot, radius: i64) -> impl Iterator<Item = &[NetRoot; 2]> {
-        (-radius..=radius).flat_map(move |step| {
-            self.columns
-                .get(&(p.0 + step))
-                .into_iter()
-                .chain(self.rows.get(&(p.1 + step)))
-                .flatten()
-        })
+        (-radius..=radius)
+            .flat_map(move |step| {
+                self.columns
+                    .get(&(p.0 + step))
+                    .into_iter()
+                    .chain(self.rows.get(&(p.1 + step)))
+                    .flatten()
+            })
+            .chain(&self.diagonals)
     }
 }
 

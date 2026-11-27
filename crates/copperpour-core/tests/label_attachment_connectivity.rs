@@ -19,6 +19,14 @@ const ONE_UNIT: &str =
     include_str!("fixtures/label_attachment_kicad10/one-unit/opamp_stage.kicad_sch");
 const TWO_UNITS: &str =
     include_str!("fixtures/label_attachment_kicad10/two-units/opamp_stage.kicad_sch");
+const DIAGONAL_OFFSET: &str =
+    include_str!("fixtures/label_attachment_kicad10/diagonal-offset/opamp_stage.kicad_sch");
+const DIAGONAL_TWO: &str =
+    include_str!("fixtures/label_attachment_kicad10/diagonal-two/opamp_stage.kicad_sch");
+const PRECISION_BEFORE: &str =
+    include_str!("fixtures/label_attachment_kicad10/precision-before/opamp_stage.kicad_sch");
+const POWER_BEFORE: &str =
+    include_str!("fixtures/label_attachment_kicad10/power-before/opamp_stage.kicad_sch");
 const PROJECT: &str =
     include_str!("fixtures/block_placement_kicad10/opamp_stage/opamp_stage.kicad_pro");
 const POWER_ROUNDED: &str =
@@ -588,4 +596,49 @@ async fn wire_runs_use_electrical_names_without_cutting_at_off_wire_labels() {
             assert_eq!(run["net"], name, "{run}");
         }
     }
+}
+
+#[tokio::test]
+async fn a_diagonal_label_must_hit_the_saved_segment() {
+    assert_membership(DIAGONAL_OFFSET, true).await;
+    assert_membership(DIAGONAL_TWO, false).await;
+}
+
+
+#[tokio::test]
+async fn a_near_axis_diagonal_route_may_not_swallow_a_label() {
+    let body = route_refusal(OFFSET, [160.02, 88.899], [170.18, 88.903]).await;
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("would join label TOLERANT_OUT"),
+        "{body}"
+    );
+}
+
+
+#[tokio::test]
+async fn a_diagonal_route_cannot_take_a_label_at_kicads_hit_boundary() {
+    let body = route_refusal(PRECISION_BEFORE, [20.0, 20.0], [120.0377, 20.0007]).await;
+    assert!(
+        body["error"]["reasons"][0]
+            .as_str()
+            .unwrap()
+            .contains("would join label REVIEW_BOUNDARY"),
+        "{body}"
+    );
+}
+
+
+#[tokio::test]
+async fn an_undotted_power_pin_on_a_diagonal_does_not_authorize_the_signal_net() {
+    let body = route_refusal(POWER_BEFORE, [40.0, 20.0], [40.0, 40.0]).await;
+    assert!(
+        body["error"]["reasons"][0]
+            .as_str()
+            .unwrap()
+            .contains("J2 pin 1 at (40, 30) on net SIGNAL"),
+        "{body}"
+    );
 }
