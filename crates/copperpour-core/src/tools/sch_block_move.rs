@@ -3,8 +3,8 @@
 //! Everything inside the box moves by one `(dx, dy)`, so connectivity inside
 //! the box cannot change. What can change is the boundary, and none of
 //! eeschema's drag rules (#315) are needed to guard it: a wire, bus, bus entry
-//! or sheet that crosses the edge refuses the move, and the pin nets of the
-//! whole sheet must come out of the move exactly as they went in.
+//! or sheet that crosses the edge refuses the move. The sheet's pin nets and
+//! named nets must come out of the move exactly as they went in.
 
 use crate::tools::sch_connectivity::{
     net_graph_for, saved_net_labels, snapshot_net_graph, NetGraph, NetRoot, PinNetNames,
@@ -322,12 +322,22 @@ pub(super) enum NetComparison {
     Cleanup,
 }
 
-/// Every symbol and sheet pin's net, or `None` if pin geometry is unresolved.
-fn pin_nets(tree: &SexpNode) -> Option<PinNets> {
+fn move_net_graph(tree: &SexpNode) -> NetGraph {
     let wires = extract_wires(tree);
     let labels = saved_net_labels(tree);
-    let mut graph = net_graph_for(tree, &wires, &labels);
-    collect_pin_nets(tree, &mut graph, &BTreeSet::new(), NetComparison::Move)
+    net_graph_for(tree, &wires, &labels)
+}
+
+fn move_pin_nets(tree: &SexpNode, graph: &mut NetGraph) -> Option<PinNets> {
+    collect_pin_nets(tree, graph, &BTreeSet::new(), NetComparison::Move)
+}
+
+#[cfg(test)]
+pub(super) fn pin_net_changes(before: &SexpNode, after: &SexpNode) -> Vec<String> {
+    compare_pin_nets(
+        move_pin_nets(before, &mut move_net_graph(before)),
+        move_pin_nets(after, &mut move_net_graph(after)),
+    )
 }
 
 fn collect_pin_nets(
@@ -410,12 +420,20 @@ fn collect_pin_nets(
     Some(nets)
 }
 
-/// How the move would change the sheet's pin nets.
+/// How the move would change the sheet's pin nets or named nets.
 ///
 /// Pins are compared by the net they share with other pins and by the net's
 /// name, never by position, since every pin in the box moves.
-pub(crate) fn pin_net_changes(before: &SexpNode, after: &SexpNode) -> Vec<String> {
-    compare_pin_nets(pin_nets(before), pin_nets(after))
+pub(crate) fn move_net_changes(before: &SexpNode, after: &SexpNode) -> Vec<String> {
+    let (mut was, mut now) = (move_net_graph(before), move_net_graph(after));
+    let mut reasons = compare_pin_nets(
+        move_pin_nets(before, &mut was),
+        move_pin_nets(after, &mut now),
+    );
+    if reasons.is_empty() {
+        compare_named_nets(&mut reasons, &mut was, &mut now);
+    }
+    reasons
 }
 
 /// Omit only the removed pins from the comparison, not their original
@@ -439,7 +457,12 @@ pub(super) fn snapshot_net_changes(
         collect_pin_nets(before, &mut was, removed, comparison),
         collect_pin_nets(after, &mut now, &BTreeSet::new(), comparison),
     );
-    // A named net can have no surviving pins that witness a name or scope change.
+    compare_named_nets(&mut reasons, &mut was, &mut now);
+    reasons
+}
+
+fn compare_named_nets(reasons: &mut Vec<String>, was: &mut NetGraph, now: &mut NetGraph) {
+    // A named net may have no local pins to witness a join or split.
     let (was, now) = (was.named_net_aliases(), now.named_net_aliases());
     for (_, (name, _)) in was.difference(&now) {
         reasons.push(format!(
@@ -449,7 +472,6 @@ pub(super) fn snapshot_net_changes(
     for (_, (name, _)) in now.difference(&was) {
         reasons.push(format!("net {name} has a new name or scope on the sheet"));
     }
-    reasons
 }
 
 fn compare_pin_nets(before: Option<PinNets>, after: Option<PinNets>) -> Vec<String> {
@@ -621,7 +643,8 @@ mod tests {
     fn nets(content: &str) -> BTreeSet<(Option<String>, BTreeSet<String>)> {
         let tree = copperpour_sexp::parse_sexp(content).unwrap();
         let mut by_root: HashMap<NetRoot, (Option<String>, BTreeSet<String>)> = HashMap::new();
-        for (root, name, label) in pin_nets(&tree).unwrap().into_values() {
+        let pins = move_pin_nets(&tree, &mut move_net_graph(&tree)).unwrap();
+        for (root, name, label) in pins.into_values() {
             let name = name.map(|(name, _)| name);
             by_root
                 .entry(root)

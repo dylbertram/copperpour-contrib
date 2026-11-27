@@ -19,6 +19,12 @@ const ONE_UNIT: &str =
     include_str!("fixtures/label_attachment_kicad10/one-unit/opamp_stage.kicad_sch");
 const TWO_UNITS: &str =
     include_str!("fixtures/label_attachment_kicad10/two-units/opamp_stage.kicad_sch");
+const MOVE_GLOBAL: &str =
+    include_str!("fixtures/label_attachment_kicad10/move-global-before/opamp_stage.kicad_sch");
+const CHILD_A: &str =
+    include_str!("fixtures/label_attachment_kicad10/move-global-before/a.kicad_sch");
+const CHILD_B: &str =
+    include_str!("fixtures/label_attachment_kicad10/move-global-before/b.kicad_sch");
 const PROJECT: &str =
     include_str!("fixtures/block_placement_kicad10/opamp_stage/opamp_stage.kicad_pro");
 const POWER_ROUNDED: &str =
@@ -588,4 +594,47 @@ async fn wire_runs_use_electrical_names_without_cutting_at_off_wire_labels() {
             assert_eq!(run["net"], name, "{run}");
         }
     }
+}
+
+#[tokio::test]
+async fn moving_a_label_cannot_join_child_nets_without_pins_on_the_moved_sheet() {
+    let handler = handler().await;
+    let sheet = Sheet::new(MOVE_GLOBAL);
+    let children = [("a.kicad_sch", CHILD_A), ("b.kicad_sch", CHILD_B)];
+    for (name, source) in children {
+        std::fs::write(sheet.path.with_file_name(name), source).unwrap();
+    }
+    let args = |dy| {
+        json!({"x1": 39.99, "x2": 40.01, "y1": 40.0009, "y2": 40.0011,
+                          "dx": 0, "dy": dy, "include": "all"})
+    };
+    let result = served(&handler, &sheet, "move_region", args(-0.001)).await;
+    assert_eq!(result["isError"], true, "{result}");
+    let report: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(report["error"]["kind"], "plan_blocked", "{report}");
+    assert_eq!(
+        report["error"]["reasons"],
+        json!([
+            "net B no longer has its baseline name and scope on the sheet",
+            "net B has a new name or scope on the sheet"
+        ]),
+        "{report}"
+    );
+    assert_eq!(std::fs::read_to_string(&sheet.path).unwrap(), MOVE_GLOBAL);
+    assert_eq!(std::fs::read_dir(sheet._dir.path()).unwrap().count(), 4);
+
+    // The same move, ending two units from the wire, keeps the nets separate.
+    let result = served(&handler, &sheet, "move_region", args(-0.0008)).await;
+    assert_ne!(result["isError"], true, "{result}");
+    let tree = copperpour_sexp::parse_sexp(&std::fs::read_to_string(&sheet.path).unwrap()).unwrap();
+    let labels = copperpour_sexp::schematic::extract_labels(&tree);
+    assert_eq!(labels.iter().find(|l| l.net == "A").unwrap().y, 40.0002);
+    for (name, source) in children {
+        assert_eq!(
+            std::fs::read_to_string(sheet.path.with_file_name(name)).unwrap(),
+            source
+        );
+    }
+    assert_eq!(std::fs::read_dir(sheet._dir.path()).unwrap().count(), 4);
 }

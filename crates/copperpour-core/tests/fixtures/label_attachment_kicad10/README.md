@@ -44,3 +44,10 @@ The `junction-1iu` review probe moves only the junction in `junction` to
 `(152.4, 88.9001)`, one saved unit from the horizontal trunk. KiCad 10.0.6
 and 10.0.8 resaved it byte for byte alike with `kicad-cli sch upgrade --force`.
 Both resaves export J2.1 on `/TOLERANT_OUT` and J2.2 on its unconnected net.
+
+## Rigid move witness
+
+The root and two child sheets were resaved with KiCad 10.0.8. The root has no pins.
+With A 0.001 mm from the B wire, both KiCad 10.0.6 and 10.0.8 export the child pins
+on separate nets. Moving A onto the wire merges the child nets; stopping 0.0002 mm
+away keeps them separate.
